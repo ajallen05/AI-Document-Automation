@@ -296,7 +296,7 @@ const ICONS = {
 };
 
 const NAV = [
-  {id:'dashboard',   label:'Dashboard',                icon:ICONS.dashboard, href:'gip-dashboard.html',                          visible:1},
+  {id:'dashboard',   label:'Dashboard',                icon:ICONS.dashboard, href:'dashboard.html',                          visible:1},
   {id:'assistant',   label:'AI Assistant',             icon:ICONS.assistant, href:'gip-ai-assistant.html', group:'Agents',       visible:0},
   {id:'notice',      label:'Notice Processing',        icon:ICONS.notice,    href:'notice_review.html',  group:'Agents',       visible:1},
   {id:'compliance',  label:'Compliance Doc (PAF)',     icon:ICONS.compliance,href:'gip-compliance.html',   group:'Agents',       visible:0},
@@ -312,8 +312,10 @@ const FOOT_ICONS = {
   status:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12" y2="20"/></svg>',
   notifications:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
 };
+/* TODO: replace with auth-derived role (e.g. from session/JWT). Reviewers see no Settings entry. */
+const CURRENT_USER_ROLE = 'admin';
 const FOOT = [
-  {id:'settings',      label:'Settings',      icon:FOOT_ICONS.settings,      href:'gip-settings.html', visible:0},
+  {id:'settings',      label:'Settings',      icon:FOOT_ICONS.settings,      href:'gip-settings.html', visible:(CURRENT_USER_ROLE==='admin'?1:0)},
   {id:'status',        label:'Status',        icon:FOOT_ICONS.status,                                   visible:0},
   {id:'notifications', label:'Notifications', icon:FOOT_ICONS.notifications, badge:'0',                 visible:0},
 ];
@@ -389,7 +391,7 @@ function dashboard(){
 
   <div class="grid">
     <div class="panel">
-      <div class="panel-head"><h3>Recent Documents</h3><a href="notice_review.html">View queue →</a></div>
+      <div class="panel-head"><h3>Recent Documents</h3><a href="gip-notice-list.html">View queue →</a></div>
       <div class="panel-body">
         ${DOCS.map(d=>`<div class="doc-row">
           <div class="doc-ico">${ICONS.file}</div>
@@ -428,18 +430,55 @@ function dashboard(){
   </div>`;
 }
 
+const SUPPORT_ICONS = {
+  life:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/></svg>',
+  phone:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+  mail:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
+  clock:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+};
+
+const SUPPORT_TIERS = [
+  {tier:'Level 1 Support', tag:'l1', tagLabel:'Level 1',
+   desc:'Available for general questions, access issues, and how-to guidance.',
+   name:'Joe Austin', phone:'(945) 399-0150', email:'austin.joe@nihishllc.com'},
+  {tier:'Escalation', tag:'esc', tagLabel:'Escalation',
+   desc:'For unresolved issues, outages, or urgent incidents.',
+   name:'Harshal Gaikwad', phone:'(714) 277-5341', email:'harshal.gaikwad@nihishllc.com'},
+];
+
 function renderPage(){
   document.getElementById('content').innerHTML = `
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                min-height:60vh;text-align:center;padding:40px 20px;color:var(--ink-soft);">
-      <div style="width:64px;height:64px;border-radius:16px;background:var(--primary-soft);
-                  display:flex;align-items:center;justify-content:center;color:var(--primary);margin-bottom:18px;">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+    <div class="sup-intro">
+      <div class="sup-intro-ico">${SUPPORT_ICONS.life}</div>
+      <div class="sup-intro-main">
+        <h2>Need Help?</h2>
+        <p>For assistance with this application, contact Nihish Support.</p>
       </div>
-      <h2 style="font-size:20px;font-weight:700;color:var(--ink);margin:0 0 8px;">Support coming soon</h2>
-      <p style="font-size:13.5px;max-width:480px;line-height:1.6;margin:0;">
-        Ticket submission and chat with our team will be available here. For now, contact your account manager directly.
-      </p>
+    </div>
+
+    <div class="sup-grid">
+      ${SUPPORT_TIERS.map(t=>`<div class="panel">
+        <div class="panel-head">
+          <h3>${t.tier}</h3>
+          <span class="sup-tier-tag ${t.tag}">${t.tagLabel}</span>
+        </div>
+        <div class="sup-card-body">
+          <p class="sup-card-desc">${t.desc}</p>
+          <div class="sup-contact">
+            <div class="sup-name">${t.name}</div>
+            <div class="sup-line"><span class="sup-line-ico">${SUPPORT_ICONS.phone}</span><span>${t.phone}</span></div>
+            <div class="sup-line"><span class="sup-line-ico">${SUPPORT_ICONS.mail}</span><span>${t.email}</span></div>
+          </div>
+        </div>
+      </div>`).join('')}
+    </div>
+
+    <div class="sup-hours">
+      <div class="sup-hours-ico">${SUPPORT_ICONS.clock}</div>
+      <div class="sup-hours-txt">
+        <strong>Support hours:</strong> [e.g., Mon–Fri, 8 AM–6 PM CT].
+        For after-hours emergencies, <a href="mailto:support@nihishllc.com" style="color:var(--primary);text-decoration:none;font-weight:600;">support@nihishllc.com</a>.
+      </div>
     </div>`;
 }
 
@@ -469,7 +508,6 @@ document.getElementById('brandIcon').onclick = ()=>{
   document.addEventListener('keydown', e=>{ if(e.key==='Escape') close(); });
 })();
 
-if(!localStorage.getItem('azure_access_token')) window.location.href = 'login.html';
 renderNav();
 renderFoot();
 renderPage();
