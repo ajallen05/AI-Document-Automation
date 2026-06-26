@@ -388,13 +388,7 @@ function renderFoot(){
   }).join('');
 }
 
-const DOCS = [
-  {type:'N-400',  applicant:'Elena Rodriguez', status:'ready',      conf:97, time:'10 min ago'},
-  {type:'I-130',  applicant:'Marcus Chen',     status:'processing', conf:null,time:'now'},
-  {type:'H4-EAD', applicant:'Priya Nair',      status:'ready',      conf:91, time:'1 hr ago'},
-  {type:'I-485',  applicant:'Ahmed Hassan',    status:'processing', conf:null,time:'now'},
-  {type:'I-765',  applicant:'David Okafor',    status:'completed',  conf:99, time:'Yesterday'},
-];
+let DOCS = [];
 const STATUS_LABEL = {ready:['ready','Ready',ICONS.dot], processing:['processing','Processing',ICONS.spin], completed:['completed','Completed',ICONS.check]};
 
 const DEADLINES = [
@@ -429,17 +423,17 @@ function pill(status){
 function confTone(c){ return c>=95?'var(--green)':c>=85?'var(--amber)':'var(--orange)'; }
 
 function dashboard(){
+  const q = QUEUE_DATA || null;
   const s = METRICS && METRICS.summary ? METRICS.summary : null;
-  const kpis = s ? [
-    {val:s.total_reviewed ?? 0,            lbl:'Total Reviewed', delta:'Reviewer feedback', dc:'var(--ink-faint)', ic:ICONS.file,  bg:'var(--primary-soft)', icol:'var(--primary)'},
-    {val:s.approved_count ?? 0,            lbl:'Approved',       delta:'Looks correct',     dc:'var(--green)',     ic:ICONS.check, bg:'var(--green-soft)',   icol:'var(--green)'},
-    {val:s.rejected_count ?? 0,            lbl:'Rejected',       delta:'Needs fixes',       dc:'var(--orange)',    ic:ICONS.dot,   bg:'var(--orange-soft)',  icol:'var(--orange)'},
-    {val:(s.approval_rate ?? 0) + '%',     lbl:'Approval Rate',  delta:'Of reviewed',       dc:'var(--primary)',   ic:ICONS.spin,  bg:'var(--primary-soft)', icol:'var(--primary)'},
-  ] : [
-    {val:6,  lbl:'In Queue',         delta:'+2 today',   dc:'var(--ink-faint)', ic:ICONS.file,   bg:'var(--primary-soft)', icol:'var(--primary)'},
-    {val:3,  lbl:'Ready for Review', delta:'Needs action',dc:'var(--primary)',  ic:ICONS.dot,    bg:'var(--primary-soft)', icol:'var(--primary)'},
-    {val:2,  lbl:'Processing',       delta:'Live',        dc:'var(--amber)',     ic:ICONS.spin,   bg:'var(--amber-soft)',   icol:'var(--amber)'},
-    {val:12, lbl:'Completed Today',  delta:'+18% vs avg', dc:'var(--green)',     ic:ICONS.check,  bg:'var(--green-soft)',   icol:'var(--green)'},
+  const inQueue    = q ? (q.review_queue      || []).length : '—';
+  const readyCount = q ? (q.processed_notices || []).length : '—';
+  const reviewed   = q ? (q.reviewed_notices  || []).length : '—';
+  const approvalRate = s ? ((s.approval_rate ?? 0) + '%') : '—';
+  const kpis = [
+    {val:inQueue,     lbl:'In Queue',         delta:'Awaiting review',  dc:'var(--ink-faint)', ic:ICONS.file,  bg:'var(--primary-soft)', icol:'var(--primary)'},
+    {val:readyCount,  lbl:'Ready for Review', delta:'Needs action',     dc:'var(--primary)',   ic:ICONS.dot,   bg:'var(--primary-soft)', icol:'var(--primary)'},
+    {val:reviewed,    lbl:'Reviewed',         delta:'All time',         dc:'var(--green)',     ic:ICONS.check, bg:'var(--green-soft)',   icol:'var(--green)'},
+    {val:approvalRate,lbl:'Approval Rate',    delta:'Of reviewed',      dc:'var(--primary)',   ic:ICONS.spin,  bg:'var(--primary-soft)', icol:'var(--primary)'},
   ];
   const topReasons = (METRICS && Array.isArray(METRICS.top_rejection_reasons)) ? METRICS.top_rejection_reasons : [];
   const max = Math.max(...VOLUME.map(v=>v[1]));
@@ -457,7 +451,7 @@ function dashboard(){
     <div class="panel">
       <div class="panel-head"><h3>Recent Documents</h3><a href="notice_review.html">View queue →</a></div>
       <div class="panel-body">
-        ${DOCS.map(d=>`<div class="doc-row">
+        ${DOCS.length ? DOCS.map(d=>`<div class="doc-row">
           <div class="doc-ico">${ICONS.file}</div>
           <div class="doc-main">
             <div class="doc-title">${d.type} — ${d.applicant}</div>
@@ -465,7 +459,7 @@ function dashboard(){
           </div>
           ${pill(d.status)}
           <div class="conf" style="color:${d.conf?confTone(d.conf):'var(--ink-faint)'};">${d.conf?d.conf+'%':'—'}</div>
-        </div>`).join('')}
+        </div>`).join('') : `<div style="padding:32px 0;text-align:center;color:var(--ink-faint);font-size:13px;">No documents yet</div>`}
       </div>
     </div>
 
@@ -506,22 +500,59 @@ function dashboard(){
 }
 
 let METRICS = null;
+let QUEUE_DATA = null;
+
 function renderPage(){
   document.getElementById('content').innerHTML = dashboard();
 }
 
-/* Load reviewer feedback metrics from /api/review/metrics */
-async function loadMetrics(){
-  const base = window.GIP_CONFIG ? window.GIP_CONFIG.API_BASE : '';
-  if(!base) return;
+function _nrRelTime(iso){
+  if(!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff/60000);
+  if(m < 1) return 'just now';
+  if(m < 60) return m + ' min ago';
+  const h = Math.floor(m/60);
+  if(h < 24) return h + ' hr ago';
+  return Math.floor(h/24) + 'd ago';
+}
+
+async function _dashFetch(path){
+  const base = window.GIP_CONFIG ? (window.GIP_CONFIG.API_BASE || '') : null;
+  if(base === null) return null;
   const t = localStorage.getItem('azure_access_token');
   try{
-    const r = await fetch(`${base}/api/review/metrics`, { headers: t ? {Authorization:'Bearer '+t} : {} });
-    if(r.status===401){ window.location.href='login.html'; return; }
-    if(!r.ok) return;
-    METRICS = await r.json();
-    renderPage();
-  }catch(e){ /* keep mock dashboard on error */ }
+    const r = await fetch(`${base}${path}`, { headers: t ? {Authorization:'Bearer '+t} : {} });
+    if(r.status===401){ window.location.href='login.html'; return null; }
+    if(!r.ok) return null;
+    return await r.json();
+  }catch(e){ return null; }
+}
+
+async function loadMetrics(){
+  const data = await _dashFetch('/api/review/metrics');
+  if(data){ METRICS = data; renderPage(); }
+}
+
+async function loadQueueData(){
+  const data = await _dashFetch('/api/review/queue');
+  if(!data) return;
+  QUEUE_DATA = data;
+  /* Build Recent Documents from live queue data (up to 5 items) */
+  const toDoc = (row, status) => ({
+    type:      row.form_type || row.form || row.document_type || 'Notice',
+    applicant: row.fn_name   || row.foreign_national_name || row.file || '',
+    status,
+    conf:      row.accuracy  != null ? Math.round(row.accuracy) : null,
+    time:      _nrRelTime(row.created_at || row.processed_at || row.reviewed_at),
+  });
+  const recent = [
+    ...(data.review_queue      || []).slice(0,3).map(r=>toDoc(r,'processing')),
+    ...(data.processed_notices || []).slice(0,2).map(r=>toDoc(r,'ready')),
+    ...(data.reviewed_notices  || []).slice(0,2).map(r=>toDoc(r,'completed')),
+  ].slice(0,5);
+  DOCS = recent;
+  renderPage();
 }
 
 // collapse toggle
@@ -558,6 +589,7 @@ if(!localStorage.getItem('azure_access_token')) window.location.href = 'login.ht
 renderNav();
 renderFoot();
 renderPage();
+loadQueueData();
 loadMetrics();
 </script>
 </body>
