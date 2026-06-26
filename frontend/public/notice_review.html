@@ -1754,12 +1754,12 @@ const TAB_META = {
 const REVIEWED_QUE = [];
 
 /* ═══ V5 Review API wiring ═══ */
-const _NR_BASE = (window.GIP_CONFIG?.API_BASE) || '/';
+const _NR_BASE = window.GIP_CONFIG ? (window.GIP_CONFIG.API_BASE || '') : null;
 function _nrAuth(){ const t=localStorage.getItem('azure_access_token'); return t?{Authorization:'Bearer '+t}:{}; }
 function _nrUser(){ try{ const u=JSON.parse(localStorage.getItem('gip_user')||'{}'); return u.username||u.display_name||''; }catch(e){ return ''; } }
 
 async function checkSession(){
-  if(!_NR_BASE) return;
+  if(_NR_BASE === null) return;
   try{
     const r = await fetch(`${_NR_BASE}/api/auth/me`, { headers:_nrAuth() });
     if(r.status===401){ window.location.href='login.html'; return; }
@@ -1840,7 +1840,7 @@ function _mapReviewedRow(q){
 
 /* Load all three queues + stats from /api/review/queue */
 async function loadQueue(){
-  if(!_NR_BASE) return;
+  if(_NR_BASE === null) return;
   try{
     const r = await fetch(`${_NR_BASE}/api/review/queue`, { headers:_nrAuth() });
     if(r.status===401){ window.location.href='login.html'; return; }
@@ -2308,7 +2308,7 @@ let DETAIL = null;          /* GET /api/notice-ui/{id}/detail response, tagged w
 let rvPdfUrl = null;        /* object URL for the current PDF blob */
 
 async function rvLoadDetail(row){
-  if(!row || !row.id || !_NR_BASE) return;
+  if(!row || !row.id || _NR_BASE === null) return;
   DETAIL = null;
   rvRenderFields();         /* clear/placeholder while loading */
   rvRenderCanvas();
