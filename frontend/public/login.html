@@ -323,7 +323,7 @@
 
       const data = await res.json();
 
-      if (!res.ok || !data.token) {
+      if (!res.ok || !data.access_token) {
         alertMsg.textContent = data.detail || 'Invalid username or password. Please try again.';
         alertEl.classList.add('show');
         btn.disabled = false;
@@ -332,8 +332,8 @@
         return;
       }
 
-      const token = data.token;
-      const expiry = Date.now() + (data.expires_in || 3600) * 1000;
+      const token = data.access_token;
+      const expiry = Date.now() + (data.expires_in_minutes || 720) * 60000;
       localStorage.setItem('azure_access_token', token);
       localStorage.setItem('azure_token_expiry', String(expiry));
       if (data.user) localStorage.setItem('gip_user', JSON.stringify(data.user));
