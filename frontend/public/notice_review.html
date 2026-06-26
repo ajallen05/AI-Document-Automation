@@ -2269,6 +2269,90 @@ document.getElementById('logoutBtn').addEventListener('click', e=>{
   window.location.href = 'login.html';
 });
 
+/* ── Review Status summary modal (Reviewed Notices tab) ── */
+(function(){
+  const overlay = document.getElementById('statsOverlay');
+  const body    = document.getElementById('statsBody');
+  const btn     = document.getElementById('reviewedStatsBtn');
+  const closeBtn= document.getElementById('statsClose');
+  if(!overlay || !body || !btn) return;
+
+  function openStats(){ renderStats(); overlay.classList.add('open'); }
+  function closeStats(){ overlay.classList.remove('open'); }
+
+  function renderStats(){
+    const rows = REVIEWED_QUE;
+    const total = rows.length;
+    const approved = rows.filter(r=>r.status==='approved').length;
+    const rejected = rows.filter(r=>r.status==='rejected').length;
+    const accVals  = rows.map(r=>r.accuracy).filter(a=>typeof a==='number');
+    const avgAcc   = accVals.length ? Math.round(accVals.reduce((a,b)=>a+b,0)/accVals.length) : null;
+    const apPct = total ? Math.round(approved/total*100) : 0;
+    const rjPct = total ? 100-apPct : 0;
+
+    const byReviewer = {};
+    rows.forEach(r=>{ const k=r.reviewed_by||'Unassigned'; byReviewer[k]=(byReviewer[k]||0)+1; });
+    const reviewers = Object.entries(byReviewer).sort((a,b)=>b[1]-a[1]);
+    const maxRev = reviewers.length ? reviewers[0][1] : 1;
+
+    const reasons = {};
+    rows.filter(r=>r.status==='rejected').forEach(r=>{ const k=r.error_detail||'Other'; reasons[k]=(reasons[k]||0)+1; });
+    const reasonList = Object.entries(reasons).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    const maxReason = reasonList.length ? reasonList[0][1] : 1;
+
+    if(total===0){
+      body.innerHTML = '<div class="stats-an-empty">No reviewed notices yet.</div>';
+      return;
+    }
+
+    body.innerHTML = `
+      <div class="stats-grid">
+        <div class="stats-cell total"><div class="v">${total}</div><div class="l">Total Reviewed</div></div>
+        <div class="stats-cell approved"><div class="v">${approved}</div><div class="l">Approved</div></div>
+        <div class="stats-cell rejected"><div class="v">${rejected}</div><div class="l">Rejected</div></div>
+      </div>
+      <div class="stats-bar-wrap">
+        <div class="stats-bar-lbl"><span>Approval rate</span><b>${apPct}%</b></div>
+        <div class="stats-bar">
+          <div class="seg approved" style="width:${apPct}%"></div>
+          <div class="seg rejected" style="width:${rjPct}%"></div>
+        </div>
+      </div>
+      <div class="stats-an-grid">
+        <div class="stats-an">
+          <div><span class="sub">By Reviewer</span><h4>Volume</h4></div>
+          <div class="stats-hbars">
+            ${reviewers.map(([name,n])=>`
+              <div class="stats-hbar-row">
+                <div class="stats-hbar-lbl"><span class="name">${name}</span><span class="n">${n}</span></div>
+                <div class="stats-hbar-track"><div class="stats-hbar-fill" style="width:${Math.round(n/maxRev*100)}%"></div></div>
+              </div>`).join('') || '<div class="stats-an-empty">No data</div>'}
+          </div>
+        </div>
+        <div class="stats-an">
+          <div><span class="sub">Rejections</span><h4>Top reasons</h4></div>
+          <div class="stats-hbars">
+            ${reasonList.map(([name,n])=>`
+              <div class="stats-hbar-row">
+                <div class="stats-hbar-lbl"><span class="name">${name}</span><span class="n">${n}</span></div>
+                <div class="stats-hbar-track"><div class="stats-hbar-fill" style="width:${Math.round(n/maxReason*100)}%"></div></div>
+              </div>`).join('') || '<div class="stats-an-empty">No rejections</div>'}
+          </div>
+        </div>
+      </div>
+      ${avgAcc!==null ? `<div class="stats-bar-wrap">
+        <div class="stats-bar-lbl"><span>Average extraction accuracy</span><b>${avgAcc}%</b></div>
+        <div class="stats-bar"><div class="seg approved" style="width:${avgAcc}%"></div></div>
+      </div>`:''}
+    `;
+  }
+
+  btn.addEventListener('click', openStats);
+  if(closeBtn) closeBtn.addEventListener('click', closeStats);
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) closeStats(); });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && overlay.classList.contains('open')) closeStats(); });
+})();
+
 renderNav();
 renderFoot();
 renderGrids();
@@ -2454,11 +2538,11 @@ function rvDocHTML(row){
 /* ─── Extracted fields (right pane) ─── */
 const rvFieldValMap = {};
 function rvFieldVal(rowId, key, fallback){
-  const k = rowId + ' ' + key;
+  const k = rowId + '' + key;
   return rvFieldValMap[k] === undefined ? fallback : rvFieldValMap[k];
 }
 function rvSetFieldVal(rowId, key, value){
-  rvFieldValMap[rowId + ' ' + key] = value;
+  rvFieldValMap[rowId + '' + key] = value;
 }
 
 /* Pretty-print an extracted_summary key e.g. receipt_number → "Receipt Number" */
