@@ -2016,14 +2016,20 @@ function updateSelectionUI(){
   });
 }
 
+function syncWidgetVisibility(){
+  document.getElementById('paWidget').style.display = activeTab === 'auto' ? '' : 'none';
+}
+
 /* tab + page-size wiring */
 document.querySelectorAll('.tab-btn').forEach(b=>{
   b.onclick = ()=>{
     activeTab = b.dataset.tab;
     currentPage = 1;
+    syncWidgetVisibility();
     renderGrids();
   };
 });
+syncWidgetVisibility();
 document.getElementById('pageSize').onchange = (e)=>{
   pageSize = +e.target.value;
   currentPage = 1;
