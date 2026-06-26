@@ -2174,9 +2174,11 @@ function setPAControls(){
   c.querySelectorAll('button').forEach(b=>{
     b.onclick = ()=>{
       const a = b.dataset.action;
+      const w = document.getElementById('paWidget');
       if(a==='to-med-up' || a==='to-med-down') paState = 'med';
       else if(a==='to-max') paState = 'max';
-      else if(a==='to-min') paState = 'min';
+      else if(a==='to-min'){ w.classList.add('bubble'); paState = 'med'; return; }
+      w.classList.remove('bubble');
       setPAControls();
       renderAgent();
     };
@@ -2185,6 +2187,15 @@ function setPAControls(){
 setPAControls();
 
 renderAgent();
+
+/* click the bubble to expand the widget */
+document.getElementById('paWidget').addEventListener('click', function(){
+  if(!this.classList.contains('bubble')) return;
+  this.classList.remove('bubble');
+  paState = 'med';
+  setPAControls();
+  renderAgent();
+});
 
 document.getElementById('collapseBtn').onclick = ()=>{
   document.getElementById('sidebar').classList.toggle('collapsed');
