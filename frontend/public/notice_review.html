@@ -2770,9 +2770,10 @@ function rvRenderHeader(){
 function rvRenderCanvas(){
   const row = rvCurrent();
   const canvas = document.getElementById('rvCanvas');
+  const usingIframe = rvPdfUrl && DETAIL && DETAIL._forId === row.id;
   if(!row){
     canvas.innerHTML = `<div style="color:#aab2c6;font-family:var(--font);padding:60px 30px;text-align:center;">No notice selected.</div>`;
-  } else if(rvPdfUrl && DETAIL && DETAIL._forId === row.id){
+  } else if(usingIframe){
     canvas.innerHTML = `<iframe src="${rvPdfUrl}" title="Source notice PDF" style="width:100%;height:100%;border:none;background:#fff;"></iframe>`;
   } else {
     canvas.innerHTML = `<div style="color:#aab2c6;font-family:var(--font);padding:60px 30px;text-align:center;">Loading PDF…</div>`;
@@ -2780,11 +2781,28 @@ function rvRenderCanvas(){
   const titleEl = document.getElementById('rvPdfTitle');
   titleEl.textContent = row ? row.file : 'Source Notice';
   titleEl.title = row ? row.file : '';
-  const totalPages = rvTotalPages();
-  document.getElementById('rvPageChip').textContent = `Page ${rvPage} of ${totalPages}`;
-  document.getElementById('rvPagePrev').disabled = rvPage <= 1;
-  document.getElementById('rvPageNext').disabled = rvPage >= totalPages;
-  document.getElementById('rvZoomLbl').textContent = rvZoom+'%';
+
+  // When using iframe, disable our controls (iframe has its own browser PDF controls)
+  const pageNav = document.querySelector('.rv-pager');
+  const zoomControls = document.querySelectorAll('[id*="rvZoom"]');
+  if(usingIframe){
+    if(pageNav) pageNav.style.opacity = '0.5';
+    document.getElementById('rvPagePrev').disabled = true;
+    document.getElementById('rvPageNext').disabled = true;
+    document.getElementById('rvZoomIn').disabled = true;
+    document.getElementById('rvZoomOut').disabled = true;
+    document.getElementById('rvPageChip').textContent = 'Use browser PDF controls';
+    document.getElementById('rvZoomLbl').textContent = 'Browser';
+  } else {
+    if(pageNav) pageNav.style.opacity = '1';
+    const totalPages = rvTotalPages();
+    document.getElementById('rvPageChip').textContent = `Page ${rvPage} of ${totalPages}`;
+    document.getElementById('rvPagePrev').disabled = rvPage <= 1;
+    document.getElementById('rvPageNext').disabled = rvPage >= totalPages;
+    document.getElementById('rvZoomIn').disabled = false;
+    document.getElementById('rvZoomOut').disabled = false;
+    document.getElementById('rvZoomLbl').textContent = rvZoom+'%';
+  }
 }
 
 function rvRenderAll(){
