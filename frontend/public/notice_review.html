@@ -2058,62 +2058,85 @@ function tickProgress(){
 }
 setInterval(tickProgress, 1500);
 
-/* ─── Processing Agent widget ─── */
-/* widget view-state: 'min' | 'med' | 'max' — defaults to medium */
-let paState = 'med';
+/* ─── Smart Ingest widget ─── */
+/* 2-state view: 'bubble' (collapsed circle launcher) | 'max' (full panel) */
+let paState = 'bubble';
+
+/* Live agent status from GET /api/notice-agent/status.
+   { connected:bool, processing:bool, agents:[…] } — drives the dot + label. */
+let AGENT_STATUS = { connected: false, processing: false, agents: [] };
 
 function renderAgent(){
+  const widget = document.getElementById('paWidget');
+  if(!widget) return;
   const body = document.getElementById('paBody');
   const statusTxt = document.getElementById('paStatusTxt');
-  if(!body) return;
-  const widget = document.getElementById('paWidget');
-  widget.classList.remove('min','med');
-  if(paState==='min') widget.classList.add('min');
-  else if(paState==='med') widget.classList.add('med');
 
-  const active = AUTO_QUE.find(r=>r.status==='processing');
+  /* "active" = a notice currently extracting, OR the backend agent reporting processing */
+  const active = AUTO_QUE.find(r=>r.status==='processing') || (AGENT_STATUS.processing ? {synthetic:true} : null);
   const pipeline = AUTO_QUE.filter(r=>r.status==='processing' || r.status==='queued');
-  statusTxt.textContent = active ? 'Processing' : 'Listening';
 
-  if(paState==='min') return; /* body hidden */
+  widget.classList.toggle('bubble', paState==='bubble');
+  widget.classList.toggle('has-active', !!active);
+
+  /* connectivity dot: green when an agent is connected, red/grey when offline */
+  const dot = widget.querySelector('.pa-status .live-dot');
+  if(dot){
+    dot.style.background = AGENT_STATUS.connected ? '' : 'var(--ink-faint)';
+  }
+
+  if(paState==='bubble'){
+    widget.setAttribute('aria-label', active ? 'Smart Ingest — processing. Click to expand.' : 'Smart Ingest — listening. Click to expand.');
+    return; /* head/body hidden by CSS */
+  }
+
+  widget.removeAttribute('aria-label');
+  if(statusTxt){
+    statusTxt.textContent = !AGENT_STATUS.connected ? 'Offline'
+      : active ? 'Processing' : 'Listening';
+  }
 
   if(!active){
-    if(paState==='max'){
-      body.innerHTML = `
-        <div class="pa-idle-xl">
-          <div class="pa-wave-xl">
-            <div class="pa-wave-core">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h3l3-9 4 18 3-9h7"/></svg>
-            </div>
+    body.innerHTML = `
+      <div class="pa-idle-xl">
+        <div class="pa-wave-xl">
+          <div class="pa-wave-core">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h3l3-9 4 18 3-9h7"/></svg>
           </div>
-          <div>
-            <div class="pa-listening">
-              Listening<span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            </div>
-            <div class="pa-sub">Waiting for new notices to process…</div>
+        </div>
+        <div>
+          <div class="pa-listening">
+            ${AGENT_STATUS.connected ? 'Listening' : 'Offline'}<span class="dot"></span><span class="dot"></span><span class="dot"></span>
           </div>
-        </div>`;
-    } else {
-      body.innerHTML = `
-        <div class="pa-idle">
-          <div class="pa-wave">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h3l3-9 4 18 3-9h7"/></svg>
-          </div>
-          <div>
-            <div class="pa-listening">
-              Listening<span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            </div>
-            <div class="pa-sub">Waiting for new notices to process…</div>
-          </div>
-        </div>`;
-    }
+          <div class="pa-sub">${AGENT_STATUS.connected ? 'Waiting for new notices to process…' : 'No ingest agent connected.'}</div>
+        </div>
+      </div>`;
     return;
   }
 
-  const pct = Math.round(active.progress || 0);
+  /* When the backend reports processing but no local AUTO_QUE row is mid-extraction,
+     show a generic processing state. */
+  if(active.synthetic && pipeline.length === 0){
+    body.innerHTML = `
+      <div class="pa-idle-xl">
+        <div class="pa-wave-xl">
+          <div class="pa-wave-core">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h3l3-9 4 18 3-9h7"/></svg>
+          </div>
+        </div>
+        <div>
+          <div class="pa-listening">Processing<span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          <div class="pa-sub">An ingest agent is processing notices…</div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const live = active.synthetic ? (pipeline[0] || null) : active;
+  const pct = Math.round((live && live.progress) || 0);
   const C = 2 * Math.PI * 17;
   const offset = C * (1 - pct/100);
-  const activeBlock = `
+  const activeBlock = live ? `
     <div class="pa-active">
       <div class="proc-ring">
         <svg viewBox="0 0 40 40">
@@ -2126,20 +2149,14 @@ function renderAgent(){
         <div class="proc-pct">${pct}%</div>
       </div>
       <div class="pa-file">
-        <div class="pa-file-name" title="${active.file}">${active.file}</div>
+        <div class="pa-file-name" title="${live.file}">${live.file}</div>
         <div class="pa-file-meta">
-          <span class="form-tag">${active.form}</span>
-          <span>${active.fn}</span>
+          <span class="form-tag">${live.form}</span>
+          <span>${live.fn}</span>
         </div>
       </div>
-    </div>`;
+    </div>` : '';
 
-  if(paState==='med'){
-    body.innerHTML = activeBlock;
-    return;
-  }
-
-  /* max — show full pipeline */
   const list = pipeline.length
     ? pipeline.map(r=>`
         <div class="pa-q-item ${r.status}">
@@ -2155,57 +2172,59 @@ function renderAgent(){
     </div>`;
 }
 
-const PA_ICONS = {
-  /* up chevron — expand from min to med */
-  expand:'<polyline points="6 15 12 9 18 15"/>',
-  /* down chevron — expand from med to max */
-  expandDown:'<polyline points="6 9 12 15 18 9"/>',
-  /* minus — collapse to next-smaller state */
-  dash:'<line x1="5" y1="12" x2="19" y2="12"/>',
-  /* corner-pinch — compress back from max to medium */
-  compress:'<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>',
-};
-
-function btn(action, iconKey, title){
-  return `<button class="pa-min" data-action="${action}" title="${title}">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${PA_ICONS[iconKey]}</svg>
-  </button>`;
-}
-
 function setPAControls(){
   const c = document.getElementById('paControls');
-  if(paState==='min'){
-    c.innerHTML = btn('to-med-up','expand','Expand');
-  } else if(paState==='max'){
-    c.innerHTML = btn('to-med-down','compress','Collapse to medium') + btn('to-min','dash','Minimize');
-  } else { /* med */
-    c.innerHTML = btn('to-max','expand','Expand to full pipeline') + btn('to-min','dash','Minimize');
-  }
-  c.querySelectorAll('button').forEach(b=>{
-    b.onclick = ()=>{
-      const a = b.dataset.action;
-      const w = document.getElementById('paWidget');
-      if(a==='to-med-up' || a==='to-med-down') paState = 'med';
-      else if(a==='to-max') paState = 'max';
-      else if(a==='to-min'){ w.classList.add('bubble'); paState = 'med'; return; }
-      w.classList.remove('bubble');
-      setPAControls();
-      renderAgent();
-    };
-  });
+  if(!c) return;
+  c.innerHTML = `<button class="pa-min" data-action="to-bubble" title="Minimize">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>`;
+  c.querySelector('button').onclick = (e)=>{
+    e.stopPropagation();
+    paState = 'bubble';
+    renderAgent();
+  };
 }
-setPAControls();
 
-renderAgent();
-
-/* click the bubble to expand the widget */
-document.getElementById('paWidget').addEventListener('click', function(){
-  if(!this.classList.contains('bubble')) return;
-  this.classList.remove('bubble');
-  paState = 'med';
+function paWidgetClick(){
+  if(paState !== 'bubble') return;
+  const widget = document.getElementById('paWidget');
+  if(!widget || !widget.classList.contains('bubble')) return;
+  paState = 'max';
   setPAControls();
   renderAgent();
+}
+
+document.getElementById('paWidget').addEventListener('click', paWidgetClick);
+document.getElementById('paWidget').addEventListener('keydown', e=>{
+  if((e.key==='Enter' || e.key===' ') && paState==='bubble'){
+    e.preventDefault();
+    paWidgetClick();
+  }
 });
+
+/* ─── Backend agent status polling ─── */
+async function loadAgentStatus(){
+  if(_NR_BASE === null) return;
+  try{
+    const r = await fetch(`${_NR_BASE}/api/notice-agent/status`, { headers:_nrAuth() });
+    if(r.status===401){ window.location.href='gip-login.html'; return; }
+    if(!r.ok) return;
+    const d = await r.json();
+    const agents = d.agents || [];
+    const connected = agents.some(a => (a.connection_status||'').toUpperCase() === 'CONNECTED');
+    const processing = agents.some(a => {
+      const s = (a.service_status||a.status||'').toUpperCase();
+      return s.includes('PROCESS') || s.includes('BUSY') || s.includes('RUNNING');
+    });
+    AGENT_STATUS = { connected, processing, agents };
+    renderAgent();
+  }catch(e){ /* keep last-known status on network error */ }
+}
+
+setPAControls();
+loadAgentStatus();
+setInterval(loadAgentStatus, 15000);
+renderAgent();
 
 document.getElementById('collapseBtn').onclick = ()=>{
   document.getElementById('sidebar').classList.toggle('collapsed');
