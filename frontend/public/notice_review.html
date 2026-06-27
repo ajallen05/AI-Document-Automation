@@ -1837,6 +1837,9 @@ function _mapReviewedRow(q){
     status:    dec === 'REJECTED' ? 'rejected' : 'approved',
     decision:  dec,
     error_detail: q.error_detail || q.primary_reason_label || q.reviewer_comment || '',
+    rejectReason: q.primary_reason_label || q.error_detail || q.reviewer_comment || (dec === 'REJECTED' ? 'Unspecified' : ''),
+    severity:     (q.severity || q.primary_reason_severity || '').toLowerCase(),
+    stage:        q.stage || q.primary_reason_stage || '',
     reviewed_by:  q.reviewed_by || '',
     reviewed_at:  q.reviewed_at || '',
     _sel: false,
@@ -2260,9 +2263,9 @@ menu.querySelectorAll('.menu-item').forEach(item=>{
   };
 });
 
-if(!localStorage.getItem('azure_access_token')) window.location.href = 'login.html';
+if(!localStorage.getItem('azure_access_token')) window.location.href = 'gip-login.html';
 
-/* ── Review Status summary modal (Reviewed Notices tab) ── */
+/* ── Review Status summary modal (Reviewed Notices tab) — rich analytics ── */
 (function(){
   const overlay = document.getElementById('statsOverlay');
   const body    = document.getElementById('statsBody');
@@ -2270,75 +2273,170 @@ if(!localStorage.getItem('azure_access_token')) window.location.href = 'login.ht
   const closeBtn= document.getElementById('statsClose');
   if(!overlay || !body || !btn) return;
 
-  function openStats(){ renderStats(); overlay.classList.add('open'); }
-  function closeStats(){ overlay.classList.remove('open'); }
+  const STATS_PALETTE = ['var(--primary)', 'var(--green)', 'var(--amber)', 'var(--orange)', 'var(--accent)', '#7e5bd2', '#0e7c91', '#c43d6b'];
+  const STATS_SEV_COLOR = {critical:'var(--orange)', high:'var(--amber)', minor:'var(--primary)', unknown:'var(--ink-faint)'};
+  const STATS_SEV_LABEL = {critical:'Critical', high:'High', minor:'Minor', unknown:'Reviewer-set'};
+
+  /* Build a donut SVG for a series of {label,count,color} entries. */
+  function statsDonut(slices, size){
+    const S = size || 118, R = S/2, IN = R - 18, OUT = R - 2;
+    const total = slices.reduce((a,d)=>a+d.count, 0);
+    if(total === 0){
+      return `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" role="img" aria-label="No data">
+        <circle cx="${R}" cy="${R}" r="${(IN+OUT)/2}" fill="none" stroke="var(--line)" stroke-width="${OUT-IN}"/>
+      </svg>`;
+    }
+    let acc = -Math.PI/2;
+    const arcs = slices.map((d)=>{
+      if(d.count === 0) return '';
+      const a0 = acc;
+      const portion = d.count/total;
+      const a1 = acc + portion*Math.PI*2;
+      acc = a1;
+      if(portion >= 0.999){
+        return `<circle cx="${R}" cy="${R}" r="${(IN+OUT)/2}" fill="none" stroke="${d.color}" stroke-width="${OUT-IN}"><title>${d.label}: ${d.count}</title></circle>`;
+      }
+      const lg = (a1-a0) > Math.PI ? 1 : 0;
+      const x0o=R+OUT*Math.cos(a0), y0o=R+OUT*Math.sin(a0);
+      const x1o=R+OUT*Math.cos(a1), y1o=R+OUT*Math.sin(a1);
+      const x0i=R+IN*Math.cos(a1),  y0i=R+IN*Math.sin(a1);
+      const x1i=R+IN*Math.cos(a0),  y1i=R+IN*Math.sin(a0);
+      const path = `M ${x0o},${y0o} A ${OUT},${OUT} 0 ${lg} 1 ${x1o},${y1o} L ${x0i},${y0i} A ${IN},${IN} 0 ${lg} 0 ${x1i},${y1i} Z`;
+      return `<path d="${path}" fill="${d.color}"><title>${d.label}: ${d.count}</title></path>`;
+    }).join('');
+    return `<svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" role="img" aria-label="Breakdown chart">${arcs}</svg>`;
+  }
+
+  function statsDonutTile(title, sub, slices){
+    const total = slices.reduce((a,d)=>a+d.count, 0);
+    if(total === 0){
+      return `<div class="stats-an">
+        <div><h4>${title}</h4><div class="sub">${sub}</div></div>
+        <div class="stats-an-empty">No data yet</div>
+      </div>`;
+    }
+    const data = slices.filter(s=>s.count>0).sort((a,b)=>b.count - a.count);
+    return `<div class="stats-an">
+      <div><h4>${title}</h4><div class="sub">${sub}</div></div>
+      <div class="stats-donut-wrap">
+        <div class="stats-donut">
+          ${statsDonut(data, 118)}
+          <div class="stats-donut-center">
+            <div class="stats-donut-val">${total}</div>
+            <div class="stats-donut-lbl">Issues</div>
+          </div>
+        </div>
+        <div class="stats-legend">
+          ${data.map(d=>`<div class="stats-leg-row">
+            <span class="stats-leg-sw" style="background:${d.color};"></span>
+            <span class="stats-leg-name" title="${d.label}">${d.label}</span>
+            <span class="stats-leg-n">${d.count}</span>
+            <span class="stats-leg-pct">${Math.round(d.count/total*100)}%</span>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function statsTopNTile(title, sub, entries, limit){
+    const slice = entries.slice(0, limit || 5);
+    if(slice.length === 0){
+      return `<div class="stats-an">
+        <div><h4>${title}</h4><div class="sub">${sub}</div></div>
+        <div class="stats-an-empty">No rejections to summarize</div>
+      </div>`;
+    }
+    const maxN = slice[0][1] || 1;
+    return `<div class="stats-an">
+      <div><h4>${title}</h4><div class="sub">${sub}</div></div>
+      <div class="stats-hbars">
+        ${slice.map(([name,n])=>`<div class="stats-hbar-row">
+          <div class="stats-hbar-lbl">
+            <span class="name" title="${name}">${name}</span>
+            <span class="n">${n}</span>
+          </div>
+          <div class="stats-hbar-track">
+            <div class="stats-hbar-fill" style="width:${Math.round(n/maxN*100)}%"></div>
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }
 
   function renderStats(){
-    const rows = REVIEWED_QUE;
-    const total = rows.length;
-    const approved = rows.filter(r=>r.status==='approved').length;
-    const rejected = rows.filter(r=>r.status==='rejected').length;
-    const accVals  = rows.map(r=>r.accuracy).filter(a=>typeof a==='number');
-    const avgAcc   = accVals.length ? Math.round(accVals.reduce((a,b)=>a+b,0)/accVals.length) : null;
+    const total = REVIEWED_QUE.length;
+    const approved = REVIEWED_QUE.filter(r=>r.status==='approved').length;
+    const rejectedRows = REVIEWED_QUE.filter(r=>r.status==='rejected');
+    const rejected = rejectedRows.length;
     const apPct = total ? Math.round(approved/total*100) : 0;
-    const rjPct = total ? 100-apPct : 0;
+    const rjPct = total ? 100 - apPct : 0;
 
-    const byReviewer = {};
-    rows.forEach(r=>{ const k=r.reviewed_by||'Unassigned'; byReviewer[k]=(byReviewer[k]||0)+1; });
-    const reviewers = Object.entries(byReviewer).sort((a,b)=>b[1]-a[1]);
-    const maxRev = reviewers.length ? reviewers[0][1] : 1;
+    /* Top reject reasons */
+    const reasonMap = {};
+    rejectedRows.forEach(r=>{
+      const k = (r.rejectReason || r.error_detail || 'Unspecified').trim() || 'Unspecified';
+      reasonMap[k] = (reasonMap[k] || 0) + 1;
+    });
+    const topReasons = Object.entries(reasonMap).sort((a,b)=>b[1]-a[1]).slice(0, 5);
 
-    const reasons = {};
-    rows.filter(r=>r.status==='rejected').forEach(r=>{ const k=r.error_detail||'Other'; reasons[k]=(reasons[k]||0)+1; });
-    const reasonList = Object.entries(reasons).sort((a,b)=>b[1]-a[1]).slice(0,6);
-    const maxReason = reasonList.length ? reasonList[0][1] : 1;
+    /* Criticality */
+    const sevMap = {critical:0, high:0, minor:0, unknown:0};
+    rejectedRows.forEach(r=>{
+      const k = (r.severity && sevMap.hasOwnProperty(r.severity)) ? r.severity : 'unknown';
+      sevMap[k]++;
+    });
+    const sevSlices = Object.entries(sevMap).map(([key, count])=>({
+      label: STATS_SEV_LABEL[key], count, color: STATS_SEV_COLOR[key],
+    }));
 
-    if(total===0){
-      body.innerHTML = '<div class="stats-an-empty">No reviewed notices yet.</div>';
-      return;
-    }
+    /* Stage */
+    const stageMap = {};
+    rejectedRows.forEach(r=>{
+      const k = r.stage || 'Unknown';
+      stageMap[k] = (stageMap[k] || 0) + 1;
+    });
+    const stageSlices = Object.entries(stageMap).map(([label, count], i)=>({
+      label, count, color: STATS_PALETTE[i % STATS_PALETTE.length],
+    }));
 
+    /* Notice type — every reviewed row */
+    const typeMap = {};
+    REVIEWED_QUE.forEach(r=>{
+      const k = r.form || 'Unknown';
+      typeMap[k] = (typeMap[k] || 0) + 1;
+    });
+    const typeSlices = Object.entries(typeMap).sort((a,b)=>b[1]-a[1])
+      .map(([label, count], i)=>({ label, count, color: STATS_PALETTE[i % STATS_PALETTE.length] }));
+
+    const empty = total === 0;
     body.innerHTML = `
       <div class="stats-grid">
-        <div class="stats-cell total"><div class="v">${total}</div><div class="l">Total Reviewed</div></div>
+        <div class="stats-cell total"><div class="v">${total}</div><div class="l">Total reviewed</div></div>
         <div class="stats-cell approved"><div class="v">${approved}</div><div class="l">Approved</div></div>
         <div class="stats-cell rejected"><div class="v">${rejected}</div><div class="l">Rejected</div></div>
       </div>
       <div class="stats-bar-wrap">
-        <div class="stats-bar-lbl"><span>Approval rate</span><b>${apPct}%</b></div>
-        <div class="stats-bar">
-          <div class="seg approved" style="width:${apPct}%"></div>
-          <div class="seg rejected" style="width:${rjPct}%"></div>
+        <div class="stats-bar-lbl">
+          <span>Outcome split</span>
+          <span><b>${apPct}%</b> approved</span>
+        </div>
+        <div class="stats-bar" role="img" aria-label="Approved ${apPct}%, rejected ${rjPct}%">
+          <div class="seg approved" style="width:${apPct}%;"></div>
+          <div class="seg rejected" style="width:${rjPct}%;"></div>
         </div>
       </div>
-      <div class="stats-an-grid">
-        <div class="stats-an">
-          <div><span class="sub">By Reviewer</span><h4>Volume</h4></div>
-          <div class="stats-hbars">
-            ${reviewers.map(([name,n])=>`
-              <div class="stats-hbar-row">
-                <div class="stats-hbar-lbl"><span class="name">${name}</span><span class="n">${n}</span></div>
-                <div class="stats-hbar-track"><div class="stats-hbar-fill" style="width:${Math.round(n/maxRev*100)}%"></div></div>
-              </div>`).join('') || '<div class="stats-an-empty">No data</div>'}
-          </div>
-        </div>
-        <div class="stats-an">
-          <div><span class="sub">Rejections</span><h4>Top reasons</h4></div>
-          <div class="stats-hbars">
-            ${reasonList.map(([name,n])=>`
-              <div class="stats-hbar-row">
-                <div class="stats-hbar-lbl"><span class="name">${name}</span><span class="n">${n}</span></div>
-                <div class="stats-hbar-track"><div class="stats-hbar-fill" style="width:${Math.round(n/maxReason*100)}%"></div></div>
-              </div>`).join('') || '<div class="stats-an-empty">No rejections</div>'}
-          </div>
-        </div>
-      </div>
-      ${avgAcc!==null ? `<div class="stats-bar-wrap">
-        <div class="stats-bar-lbl"><span>Average extraction accuracy</span><b>${avgAcc}%</b></div>
-        <div class="stats-bar"><div class="seg approved" style="width:${avgAcc}%"></div></div>
-      </div>`:''}
-    `;
+      ${empty
+        ? `<div class="stats-an-empty" style="padding:32px 8px;">No reviewed notices yet.</div>`
+        : `<div class="stats-an-grid">
+            ${statsTopNTile('Top 5 Issues', 'Most common reject reasons', topReasons, 5)}
+            ${statsDonutTile('Issues by Criticality', 'Severity of rejected notices', sevSlices)}
+            ${statsDonutTile('Issues by Stage', 'Where the AI slipped up', stageSlices)}
+            ${statsDonutTile('Issues by Notice Type', 'Volume across USCIS forms', typeSlices)}
+          </div>`}`;
   }
+
+  function openStats(){ renderStats(); overlay.classList.add('open'); }
+  function closeStats(){ overlay.classList.remove('open'); }
 
   btn.addEventListener('click', openStats);
   if(closeBtn) closeBtn.addEventListener('click', closeStats);
