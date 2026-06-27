@@ -2593,32 +2593,72 @@ function _nrConf(c){
 }
 
 /* Build the field-card list from the loaded API detail (fields[] or extracted_summary) */
+/* Map API field keys → RV_FIELDS_TEMPLATE keys */
+const _FIELD_KEY_MAP = {
+  'receipt_for':          'Receipt For',
+  'receipt_type':         'Receipt Type',
+  'gov_form':             'Gov Form',
+  'form_type':            'Gov Form',
+  'matter_pending_at':    'Matter Pending at',
+  'sent_government_agency': 'Sent Government Agency',
+  'sent_date':            'Sent Government Agency',
+  'receipt_date':         'Receipt Date',
+  'received_date':        'Receipt Date',
+  'receipt_number':       'Receipt Number',
+  'receipt_notice_date':  'Receipt Notice Date',
+  'notice_date':          'Receipt Notice Date',
+  'receipt_status':       'Receipt Status',
+  'notice_status':        'Receipt Status',
+  'expiration_notice':    'Expiration Notice',
+  'receipt_notes':        'Receipt Notes',
+  'notes':                'Receipt Notes',
+};
+
 function rvFieldsForCurrent(){
   const row = rvCurrent();
-  if(!row) return [];
-  if(!DETAIL || DETAIL._forId !== row.id) return [];
+  if(!row) return RV_FIELDS_TEMPLATE.map(f=>({...f}));
 
+  /* Always use template structure. If DETAIL loaded, fill values from API data. */
+  const fields = RV_FIELDS_TEMPLATE.map(f=>({...f}));
+
+  if(!DETAIL || DETAIL._forId !== row.id) return fields;
+
+  /* Build a flat lookup: normalizedKey → {value, conf, src} from API */
+  const apiMap = {};
   const arr = Array.isArray(DETAIL.fields) ? DETAIL.fields : [];
-  if(arr.length){
-    return arr.map(f=>{
-      const key = f.field_label || f.label || f.field_name || f.name || f.key || '—';
-      const value = f.value ?? f.normalized_value ?? f.raw_value ?? '';
-      return {
-        key,
-        value: value == null ? '' : String(value),
-        conf: _nrConf(f.confidence ?? f.conf),
-        src: (f.source || f.src || 'llm').toString().toLowerCase().includes('nat') ? 'native' : (f.source || 'llm'),
-        type: 'text',
-      };
-    });
-  }
-
-  /* Fallback: render extracted_summary as read-only-ish text fields */
+  arr.forEach(f=>{
+    const k = (f.field_label||f.label||f.field_name||f.name||f.key||'').toLowerCase().replace(/[\s\-]/g,'_');
+    const v = f.value ?? f.normalized_value ?? f.raw_value ?? '';
+    apiMap[k] = { value: String(v), conf: _nrConf(f.confidence ?? f.conf), src: (f.source||f.src||'llm').toLowerCase().includes('nat')?'native':'llm' };
+  });
+  /* Also check extracted_summary */
   const sum = DETAIL.extracted_summary || {};
   const overall = _nrConf(sum.overall_extraction_confidence);
-  return Object.keys(sum)
-    .filter(k => k !== 'overall_extraction_confidence' && sum[k] != null && sum[k] !== '')
-    .map(k => ({ key:_nrLabel(k), value:String(sum[k]), conf:overall || 90, src:'native', type:'text' }));
+  Object.keys(sum).forEach(k=>{
+    if(k === 'overall_extraction_confidence') return;
+    if(sum[k] == null || sum[k] === '') return;
+    if(!apiMap[k]) apiMap[k] = { value: String(sum[k]), conf: overall||90, src:'native' };
+  });
+
+  /* Fill template fields from apiMap */
+  fields.forEach(f=>{
+    /* try exact template key first (lowercased), then _FIELD_KEY_MAP reverse lookup */
+    const normKey = f.key.toLowerCase().replace(/[\s\-]/g,'_');
+    const hit = apiMap[normKey] || (() => {
+      /* find by checking if any apiMap key maps to this template key */
+      for(const [ak, tk] of Object.entries(_FIELD_KEY_MAP)){
+        if(tk === f.key && apiMap[ak]) return apiMap[ak];
+      }
+      return null;
+    })();
+    if(hit && hit.value !== '' && hit.value !== 'None' && hit.value !== 'null'){
+      f.value = hit.value;
+      f.conf  = hit.conf;
+      f.src   = hit.src;
+    }
+  });
+
+  return fields;
 }
 
 const rvPrimaryMap = {};
