@@ -6,6 +6,7 @@
 <title>GIP Reviewer — Queue List</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="env-config.js"></script>
 <style>
   :root{
@@ -2407,20 +2408,26 @@ const rvRoot = document.getElementById('rvRoot');
 
 function rvCurrent(){ return rvSingleRow ? rvSingleRow : (REVIEW_QUE[rvIndex] || null); }
 function rvIsSingleMode(){ return rvSingleRow !== null; }
-function rvTotalPages(){ return 1; }
+/* ─── PDF.js state ─── */
+let _pdfDoc = null;         /* loaded PDFDocumentProxy */
+let _pdfPage = null;        /* current PDFPageProxy */
+let _pdfRendering = false;
+let _pdfPendingPage = null;
+
+function rvTotalPages(){ return _pdfDoc ? _pdfDoc.numPages : 1; }
 
 /* ─── Detail + PDF loading from the V5 API ─── */
-let DETAIL = null;          /* GET /api/notice-ui/{id}/detail response, tagged with _forId */
-let rvPdfUrl = null;        /* object URL for the current PDF blob */
+let DETAIL = null;
+let rvPdfUrl = null;
 
 async function rvLoadDetail(row){
   if(!row || !row.id || _NR_BASE === null) return;
   DETAIL = null;
-  rvRenderFields();         /* clear/placeholder while loading */
+  rvRenderFields();
   rvRenderCanvas();
   try{
     const r = await fetch(`${_NR_BASE}/api/notice-ui/${encodeURIComponent(row.id)}/detail`, { headers:_nrAuth() });
-    if(r.status===401){ window.location.href='login.html'; return; }
+    if(r.status===401){ window.location.href='gip-login.html'; return; }
     if(!r.ok) return;
     const d = await r.json();
     d._forId = row.id;
@@ -2429,31 +2436,66 @@ async function rvLoadDetail(row){
       rvRenderFields();
       rvLoadPdf(row, d.pdf_preview_path);
     }
-  }catch(e){ /* leave placeholder doc on error */ }
+  }catch(e){}
 }
 
 async function rvLoadPdf(row, previewPath){
-  const canvas = document.getElementById('rvCanvas');
-  if(!canvas) return;
-  /* derive PDF path: prefer detail.pdf_preview_path, else build from doc_id */
+  const wrap = document.getElementById('rvCanvas');
+  if(!wrap) return;
   let path = previewPath;
   if(!path && row.doc_id) path = `/api/company-documents/${encodeURIComponent(row.doc_id)}/pdf-preview`;
-  if(!path){ return; }
+  if(!path) return;
   const url = path.startsWith('http') ? path : `${_NR_BASE}${path}`;
-  canvas.innerHTML = `<div style="color:#aab2c6;font-family:var(--font);padding:60px 30px;text-align:center;">Loading PDF…</div>`;
+  wrap.innerHTML = `<div style="color:#aab2c6;font-family:var(--font);padding:60px 30px;text-align:center;">Loading PDF…</div>`;
   try{
+    /* Fetch the PDF bytes with auth header */
     const r = await fetch(url, { headers:_nrAuth() });
     if(!r.ok) throw new Error('pdf '+r.status);
-    const blob = await r.blob();
+    const buf = await r.arrayBuffer();
     if(rvPdfUrl) URL.revokeObjectURL(rvPdfUrl);
-    rvPdfUrl = URL.createObjectURL(blob);
-    if(rvCurrent() && rvCurrent().id === row.id){
-      canvas.innerHTML = `<iframe src="${rvPdfUrl}" title="Source notice PDF"
-        style="width:100%;height:100%;border:none;background:#fff;"></iframe>`;
-    }
+    rvPdfUrl = url;
+    if(!rvCurrent() || rvCurrent().id !== row.id) return;
+
+    /* Load via PDF.js */
+    const pdfjsLib = window['pdfjs-dist/build/pdf'];
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    _pdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+    rvPage = 1;
+    rvRenderCanvas();
+    rvRenderPdfPage();
   }catch(e){
-    canvas.innerHTML = `<div style="color:var(--orange);font-family:var(--font);padding:60px 30px;text-align:center;">
-      Could not load PDF preview.</div>`;
+    wrap.innerHTML = `<div style="color:var(--orange);font-family:var(--font);padding:60px 30px;text-align:center;">Could not load PDF preview.</div>`;
+  }
+}
+
+async function rvRenderPdfPage(){
+  if(!_pdfDoc) return;
+  if(_pdfRendering){ _pdfPendingPage = rvPage; return; }
+  _pdfRendering = true;
+  const wrap = document.getElementById('rvCanvas');
+  try{
+    const page = await _pdfDoc.getPage(rvPage);
+    const scale = (rvZoom / 100) * 1.5; /* 1.5 = base scale for readability */
+    const viewport = page.getViewport({ scale });
+    let canvas = wrap.querySelector('canvas.pdf-canvas');
+    if(!canvas){
+      wrap.innerHTML = '';
+      canvas = document.createElement('canvas');
+      canvas.className = 'pdf-canvas';
+      canvas.style.cssText = 'display:block;box-shadow:0 4px 24px rgba(0,0,0,.5);border-radius:4px;';
+      wrap.appendChild(canvas);
+    }
+    canvas.height = viewport.height;
+    canvas.width  = viewport.width;
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    rvRenderCanvas(); /* update page chip + button states */
+  }catch(e){}
+  _pdfRendering = false;
+  if(_pdfPendingPage !== null){
+    rvPage = _pdfPendingPage;
+    _pdfPendingPage = null;
+    rvRenderPdfPage();
   }
 }
 
@@ -2766,43 +2808,27 @@ function rvRenderHeader(){
   }
 }
 
-/* ─── PDF pane render ─── */
+/* ─── PDF pane render (controls only — PDF.js draws the canvas) ─── */
 function rvRenderCanvas(){
   const row = rvCurrent();
-  const canvas = document.getElementById('rvCanvas');
-  const usingIframe = rvPdfUrl && DETAIL && DETAIL._forId === row.id;
+  const wrap = document.getElementById('rvCanvas');
   if(!row){
-    canvas.innerHTML = `<div style="color:#aab2c6;font-family:var(--font);padding:60px 30px;text-align:center;">No notice selected.</div>`;
-  } else if(usingIframe){
-    canvas.innerHTML = `<iframe src="${rvPdfUrl}" title="Source notice PDF" style="width:100%;height:100%;border:none;background:#fff;"></iframe>`;
-  } else {
-    canvas.innerHTML = `<div style="color:#aab2c6;font-family:var(--font);padding:60px 30px;text-align:center;">Loading PDF…</div>`;
+    wrap.innerHTML = `<div style="color:#aab2c6;font-family:var(--font);padding:60px 30px;text-align:center;">No notice selected.</div>`;
+  } else if(!_pdfDoc){
+    /* don't overwrite if pdf.js already painted a canvas */
+    if(!wrap.querySelector('canvas.pdf-canvas'))
+      wrap.innerHTML = `<div style="color:#aab2c6;font-family:var(--font);padding:60px 30px;text-align:center;">Loading PDF…</div>`;
   }
   const titleEl = document.getElementById('rvPdfTitle');
   titleEl.textContent = row ? row.file : 'Source Notice';
   titleEl.title = row ? row.file : '';
-
-  // When using iframe, disable our controls (iframe has its own browser PDF controls)
-  const pageNav = document.querySelector('.rv-pager');
-  const zoomControls = document.querySelectorAll('[id*="rvZoom"]');
-  if(usingIframe){
-    if(pageNav) pageNav.style.opacity = '0.5';
-    document.getElementById('rvPagePrev').disabled = true;
-    document.getElementById('rvPageNext').disabled = true;
-    document.getElementById('rvZoomIn').disabled = true;
-    document.getElementById('rvZoomOut').disabled = true;
-    document.getElementById('rvPageChip').textContent = 'Use browser PDF controls';
-    document.getElementById('rvZoomLbl').textContent = 'Browser';
-  } else {
-    if(pageNav) pageNav.style.opacity = '1';
-    const totalPages = rvTotalPages();
-    document.getElementById('rvPageChip').textContent = `Page ${rvPage} of ${totalPages}`;
-    document.getElementById('rvPagePrev').disabled = rvPage <= 1;
-    document.getElementById('rvPageNext').disabled = rvPage >= totalPages;
-    document.getElementById('rvZoomIn').disabled = false;
-    document.getElementById('rvZoomOut').disabled = false;
-    document.getElementById('rvZoomLbl').textContent = rvZoom+'%';
-  }
+  const totalPages = rvTotalPages();
+  document.getElementById('rvPageChip').textContent = `Page ${rvPage} of ${totalPages}`;
+  document.getElementById('rvPagePrev').disabled = rvPage <= 1;
+  document.getElementById('rvPageNext').disabled = rvPage >= totalPages;
+  document.getElementById('rvZoomIn').disabled = false;
+  document.getElementById('rvZoomOut').disabled = false;
+  document.getElementById('rvZoomLbl').textContent = rvZoom+'%';
 }
 
 function rvRenderAll(){
@@ -2850,12 +2876,12 @@ function openSingleReview(row, opts){
 }
 
 function closeReviewMode(){
-  /* if GCM modal is open, Esc closes it first (handled in keydown) */
   rvRoot.classList.remove('open');
   rvRoot.classList.remove('rv-preview');
   document.body.style.overflow = '';
   rvSingleRow = null;
   rvPreviewMode = false;
+  _pdfDoc = null; _pdfPage = null; _pdfRendering = false; _pdfPendingPage = null;
   if(document.fullscreenElement && document.exitFullscreen){
     document.exitFullscreen().catch(()=>{});
   }
@@ -2866,23 +2892,27 @@ function rvGoto(delta){
   if(next<0 || next>=REVIEW_QUE.length) return;
   rvIndex = next;
   rvPage = 1;
-  rvPdfUrl = null; DETAIL = null;
+  rvPdfUrl = null; DETAIL = null; _pdfDoc = null;
   rvRenderAll();
   rvLoadDetail(rvCurrent());
 }
 
 /* ─── PDF tools ─── */
 function rvSetZoom(d){
-  rvZoom = Math.max(60, Math.min(180, rvZoom + d));
-  const doc = document.getElementById('rvDoc');
-  if(doc) doc.style.transform = `scale(${rvZoom/100})`;
+  rvZoom = Math.max(25, Math.min(300, rvZoom + d));
   document.getElementById('rvZoomLbl').textContent = rvZoom+'%';
+  if(_pdfDoc) rvRenderPdfPage();
+  else {
+    const doc = document.getElementById('rvDoc');
+    if(doc) doc.style.transform = `scale(${rvZoom/100})`;
+  }
 }
 function rvSetPage(d){
   const p = rvPage + d;
   if(p<1 || p>rvTotalPages()) return;
   rvPage = p;
   rvRenderCanvas();
+  if(_pdfDoc) rvRenderPdfPage();
 }
 
 /* ─── Confirm / skip ─── */
