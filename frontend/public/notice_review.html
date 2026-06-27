@@ -1066,7 +1066,7 @@
             Support
           </a>
           <div class="user-pop-sep"></div>
-          <a class="user-pop-item" href="login.html" role="menuitem">
+          <a class="user-pop-item" id="logoutBtn" href="login.html?logout=1" role="menuitem">
             <span class="ico"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
             Logout
           </a>
@@ -1585,8 +1585,9 @@ const FOOT_ICONS = {
   status:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12" y2="20"/></svg>',
   notifications:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
 };
+const CURRENT_USER_ROLE = (()=>{ try{ return (JSON.parse(localStorage.getItem('gip_user')||'{}').role||'reviewer').toLowerCase(); }catch(e){ return 'reviewer'; } })();
 const FOOT = [
-  {id:'settings',      label:'Settings',      icon:FOOT_ICONS.settings,      href:'gip-settings.html', visible:0},
+  {id:'settings',      label:'Settings',      icon:FOOT_ICONS.settings,      href:'gip-settings.html', visible:(CURRENT_USER_ROLE==='admin'?1:0)},
   {id:'status',        label:'Status',        icon:FOOT_ICONS.status,                                   visible:0},
   {id:'notifications', label:'Notifications', icon:FOOT_ICONS.notifications, badge:'0',                 visible:0},
 ];
@@ -1763,6 +1764,26 @@ const _NR_BASE = window.GIP_CONFIG ? (window.GIP_CONFIG.API_BASE || '') : null;
 function _nrAuth(){ const t=localStorage.getItem('azure_access_token'); return t?{Authorization:'Bearer '+t}:{}; }
 function _nrUser(){ try{ const u=JSON.parse(localStorage.getItem('gip_user')||'{}'); return u.username||u.display_name||''; }catch(e){ return ''; } }
 
+/* Paint the sidebar user card (name, role, avatar initial) from a user object */
+function _paintUser(u){
+  if(!u) return;
+  const name = u.display_name || u.username || 'User';
+  const role = u.role || 'reviewer';
+  const nameEl = document.querySelector('.user-name');
+  const roleEl = document.querySelector('.user-role');
+  const avEl   = document.querySelector('#userBtn .avatar');
+  const btnEl  = document.getElementById('userBtn');
+  if(nameEl) nameEl.textContent = name;
+  if(roleEl) roleEl.textContent = role;
+  if(avEl)   avEl.textContent   = name.charAt(0).toUpperCase();
+  if(btnEl){ btnEl.setAttribute('data-label', name); btnEl.setAttribute('title', name + ' · ' + role); }
+}
+
+/* Populate immediately from stored session so the card never flashes a placeholder */
+(function(){
+  try{ _paintUser(JSON.parse(localStorage.getItem('gip_user') || '{}')); }catch(e){}
+})();
+
 async function checkSession(){
   if(_NR_BASE === null) return;
   try{
@@ -1771,10 +1792,7 @@ async function checkSession(){
     if(r.ok){
       const u = await r.json();
       localStorage.setItem('gip_user', JSON.stringify(u));
-      const nameEl = document.querySelector('.user-name');
-      const roleEl = document.querySelector('.user-role');
-      if(nameEl) nameEl.textContent = u.display_name || u.username || '';
-      if(roleEl) roleEl.textContent = u.role || '';
+      _paintUser(u);
     }
   }catch(e){ /* ignore network errors — session stays as-is */ }
 }
@@ -2207,7 +2225,7 @@ async function loadAgentStatus(){
   if(_NR_BASE === null) return;
   try{
     const r = await fetch(`${_NR_BASE}/api/notice-agent/status`, { headers:_nrAuth() });
-    if(r.status===401){ window.location.href='gip-login.html'; return; }
+    if(r.status===401){ window.location.href='login.html'; return; }
     if(!r.ok) return;
     const d = await r.json();
     const agents = d.agents || [];
@@ -2282,7 +2300,7 @@ menu.querySelectorAll('.menu-item').forEach(item=>{
   };
 });
 
-if(!localStorage.getItem('azure_access_token')) window.location.href = 'gip-login.html';
+if(!localStorage.getItem('azure_access_token')) window.location.href = 'login.html';
 
 /* ── Review Status summary modal (Reviewed Notices tab) — rich analytics ── */
 (function(){
@@ -2544,7 +2562,7 @@ async function rvLoadDetail(row){
   rvRenderCanvas();
   try{
     const r = await fetch(`${_NR_BASE}/api/notice-ui/${encodeURIComponent(row.id)}/detail`, { headers:_nrAuth() });
-    if(r.status===401){ window.location.href='gip-login.html'; return; }
+    if(r.status===401){ window.location.href='login.html'; return; }
     if(!r.ok) return;
     const d = await r.json();
     d._forId = row.id;
